@@ -1,0 +1,8 @@
+/.deps/
+/build/
+/dist/
+/client/.venv/
+/client/generated/*_pb2.py
+/client/generated/*_pb2_grpc.py
+__pycache__/
+*.pyc

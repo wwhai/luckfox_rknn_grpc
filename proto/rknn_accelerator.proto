@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package luckfox.rknn;
+
+option java_multiple_files = true;
+option java_package = "com.luckfox.rknn";
+option csharp_namespace = "Luckfox.Rknn";
+
+service RknnAccelerator {
+  rpc GetServerInfo(ServerInfoRequest) returns (ServerInfoResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+  rpc GetPerformance(PerformanceRequest) returns (PerformanceResponse);
+  rpc OpenSession(OpenSessionRequest) returns (OpenSessionResponse);
+  rpc Infer(InferRequest) returns (InferResponse);
+  rpc StreamInfer(stream InferRequest) returns (stream InferResponse);
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
+}
+
+message ServerInfoRequest {}
+
+message ServerInfoResponse {
+  string device = 1;
+  repeated ModelInfo models = 2;
+  uint32 max_image_bytes = 3;
+  uint32 max_sessions = 4;
+  BoardInfo board = 5;
+  bool exclusive_access = 6;
+}
+
+message BoardInfo {
+  string hostname = 1;
+  string board_model = 2;
+  string soc = 3;
+  string operating_system = 4;
+  string architecture = 5;
+}
+
+message ModelInfo {
+  string name = 1;
+  string task = 2;
+  uint32 input_width = 3;
+  uint32 input_height = 4;
+  repeated ImageEncoding accepted_encodings = 5;
+  string quantization = 6;
+  string tensor_layout = 7;
+  uint64 file_size_bytes = 8;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  ServingStatus status = 1;
+  uint32 active_sessions = 2;
+  uint32 queued_requests = 3;
+  string message = 4;
+}
+
+message PerformanceRequest {}
+
+message PerformanceResponse {
+  uint32 cpu_core_count = 1;
+  double cpu_usage_percent = 2;
+  double load_average_1m = 3;
+  double load_average_5m = 4;
+  double load_average_15m = 5;
+  uint64 memory_total_bytes = 6;
+  uint64 memory_available_bytes = 7;
+  double memory_usage_percent = 8;
+  uint64 uptime_seconds = 9;
+  bool temperature_available = 10;
+  double temperature_celsius = 11;
+}
+
+message OpenSessionRequest {
+  string client_name = 1;
+  string model_name = 2;
+  string password = 3;
+}
+
+message OpenSessionResponse {
+  string session_id = 1;
+  ModelInfo model = 2;
+  uint32 idle_timeout_seconds = 3;
+}
+
+message InferRequest {
+  string session_id = 1;
+  string request_id = 2;
+  bytes image = 3;
+  ImageEncoding encoding = 4;
+  InferOptions options = 5;
+}
+
+message InferOptions {
+  float score_threshold = 1;
+  float nms_threshold = 2;
+  uint32 max_detections = 3;
+}
+
+message InferResponse {
+  string request_id = 1;
+  uint32 image_width = 2;
+  uint32 image_height = 3;
+  repeated Detection detections = 4;
+  Timing timing = 5;
+}
+
+message Detection {
+  uint32 class_id = 1;
+  string label = 2;
+  float score = 3;
+  BoundingBox box = 4;
+  uint32 sequence_number = 5;
+}
+
+message BoundingBox {
+  uint32 left = 1;
+  uint32 top = 2;
+  uint32 right = 3;
+  uint32 bottom = 4;
+}
+
+message Timing {
+  uint64 queue_us = 1;
+  uint64 decode_us = 2;
+  uint64 inference_us = 3;
+  uint64 total_us = 4;
+}
+
+message CloseSessionRequest {
+  string session_id = 1;
+}
+
+message CloseSessionResponse {
+  bool closed = 1;
+}
+
+enum ImageEncoding {
+  IMAGE_ENCODING_UNSPECIFIED = 0;
+  IMAGE_ENCODING_JPEG = 1;
+  IMAGE_ENCODING_PNG = 2;
+}
+
+enum ServingStatus {
+  SERVING_STATUS_UNSPECIFIED = 0;
+  SERVING_STATUS_SERVING = 1;
+  SERVING_STATUS_NOT_SERVING = 2;
+  SERVING_STATUS_DEGRADED = 3;
+}
