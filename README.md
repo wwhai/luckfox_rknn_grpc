@@ -105,6 +105,56 @@ Windows 客户端固定使用 Python 3.12；当前依赖版本不支持 Python 3
 
 连接加速器后，可使用客户端中的 `Local Video` 打开本地视频、`Camera` 打开默认摄像头，或通过 `RTSP / Stream` 输入 RTSP/HTTP 地址。视频播放与推理由独立工作线程处理：播放按视频帧率持续进行，推理只消费最新帧，推理速度不足时自动跳过过期帧。界面分别显示 Playback FPS 与 Inference FPS，`Stop` 可随时停止。
 
+## 工作原理架构
+
+```mermaid
+flowchart LR
+    subgraph Host[主机 / 客户端]
+        Input[图片 / 视频 / 摄像头 / 网络流]
+        UI[Tk GUI]
+        SDK[Python gRPC Client]
+        Input --> UI --> SDK
+    end
+
+    subgraph Network[局域网]
+        Discovery[UDP 50052<br/>设备发现]
+        RPC[TCP 50051<br/>gRPC + Protobuf]
+    end
+
+    subgraph Board[Luckfox Pico RV1106 / RV1103]
+        DiscoveryService[Discovery Service]
+        GrpcServer[gRPC Server]
+        Session[密码认证与独占 Session]
+        Scheduler[NPU 串行调度]
+        Decode[图片解码与 Resize]
+        Engine[YOLOv5 推理引擎]
+        Postprocess[后处理<br/>置信度过滤 + NMS]
+        Runtime[RKNN Runtime]
+        NPU[Rockchip NPU]
+        Model[(YOLOv5 RKNN 模型)]
+
+        DiscoveryService --> GrpcServer
+        GrpcServer --> Session --> Scheduler
+        Scheduler --> Decode --> Engine --> Runtime --> NPU
+        Model --> Runtime
+        NPU --> Postprocess --> GrpcServer
+    end
+
+    SDK -. 广播扫描 .-> Discovery --> DiscoveryService
+    DiscoveryService -. 设备 / 模型 / 忙碌状态 .-> Discovery
+    SDK -- 认证、会话、图像数据 --> RPC --> GrpcServer
+    GrpcServer -- 检测框、类别、置信度、耗时 --> RPC --> SDK
+
+    classDef host fill:#e8f3ed,stroke:#287653,color:#163c2d
+    classDef network fill:#fff4d6,stroke:#b17a00,color:#5c4000
+    classDef board fill:#e8eff8,stroke:#315f8c,color:#18334d
+    class Input,UI,SDK host
+    class Discovery,RPC network
+    class DiscoveryService,GrpcServer,Session,Scheduler,Decode,Engine,Postprocess,Runtime,NPU,Model board
+```
+
+客户端先通过 UDP 广播发现局域网中的开发板，再通过 TCP 建立 gRPC 连接。服务端完成密码认证并创建独占 Session，随后将图像请求串行送入 RKNN NPU；推理结果经过置信度过滤和 NMS 后，以 Protobuf 消息返回检测框及各阶段耗时。
+
 ## API 生命周期
 
 ```mermaid
