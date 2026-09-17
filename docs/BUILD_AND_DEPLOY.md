@@ -32,15 +32,39 @@ bash scripts/build_server.sh
 
 The package contains the executable, model, label file, RKNN runtime and process script. gRPC/protobuf are statically linked to reduce board deployment complexity.
 
+## Packaging For Distribution
+
+`scripts/package_tar.sh` packs `dist/luckfox_rknn_grpc/` into a single **uncompressed POSIX tar** (`luckfox_rknn_grpc-<version>_<timestamp>.tar`), so BuildRoot boards can extract it with BusyBox `tar -xf` without needing `zip` or `gzip`:
+
+```bash
+bash scripts/package_tar.sh
+# Created: dist/luckfox_rknn_grpc-7f5ddba_20260917_174445.tar
+# SHA256:  ...
+```
+
 ## Board Operations
+
+The package ships a SysVinit service (BuildRoot + BusyBox init). Install once after placing the package:
+
+```bash
+cd / && tar -xf /tmp/luckfox_rknn_grpc-*.tar     # extracts to /root/luckfox_rknn_grpc/
+sh /root/luckfox_rknn_grpc/deploy/install_service.sh
+```
+
+This copies `deploy/luckfox-rknn-grpc` to `/etc/init.d/`, creates `/etc/rc.d/S90luckfox-rknn-grpc` and `K10luckfox-rknn-grpc` symlinks for boot auto-start, writes a default `password` file if absent, and starts the server.
+
+Control with:
+
+```bash
+/etc/init.d/luckfox-rknn-grpc {start|stop|restart|reload|status}
+tail -f /root/luckfox_rknn_grpc/server.log
+```
+
+A legacy process script `start_server.sh` remains for compatibility:
 
 ```bash
 cd /root/luckfox_rknn_grpc
-./start_server.sh start
-./start_server.sh status
-./start_server.sh logs
-./start_server.sh restart
-./start_server.sh stop
+./start_server.sh start|stop|restart|status|logs
 ```
 
 The service writes `server.pid` and `server.log` in its own directory. It sets `LD_LIBRARY_PATH` only for the server process and does not modify the system image.
@@ -50,7 +74,18 @@ The server requires a password and uses `19940724` by default. To change it:
 ```bash
 printf '%s' 'replace-with-a-long-random-password' > /root/luckfox_rknn_grpc/password
 chmod 600 /root/luckfox_rknn_grpc/password
-/root/luckfox_rknn_grpc/start_server.sh restart
+/etc/init.d/luckfox-rknn-grpc restart
+```
+
+## Updating The Board
+
+`deploy/update_server.sh` swaps the package while preserving `password` and `server.log`, and keeps the previous tree at `$APP_DIR.old`:
+
+```bash
+# from the host (default target root@192.168.0.108)
+sh deploy/update_server.sh ssh root@192.168.0.108
+# or on the board, from a local package directory
+sh /root/luckfox_rknn_grpc/deploy/update_server.sh local /tmp/luckfox_rknn_grpc_new
 ```
 
 ## Network And Security

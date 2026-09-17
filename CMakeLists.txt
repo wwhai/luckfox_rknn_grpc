@@ -86,3 +86,9 @@ install(FILES
     DESTINATION model)
 install(FILES "${RKNN_EXAMPLE_ROOT}/lib/uclibc/librknnmrt.so" DESTINATION lib)
 install(PROGRAMS deploy/start_server.sh DESTINATION .)
+# System service deployment helpers (SysVinit, BuildRoot + BusyBox).
+install(PROGRAMS deploy/initd/luckfox-rknn-grpc DESTINATION deploy/initd)
+install(PROGRAMS
+    deploy/install_service.sh
+    deploy/update_server.sh
+    DESTINATION deploy)

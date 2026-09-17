@@ -1,5 +1,5 @@
 # Luckfox RKNN gRPC Accelerator
-
+![1789643662503](image/README/1789643662503.png)
 将 Luckfox Pico RV1106/RV1103 作为局域网 RKNN 推理加速节点。服务端使用 gRPC C++，除 gRPC 必须的 Service 类外，推理引擎、会话管理和程序入口均采用 C 风格函数与结构体。
 
 当前提供 YOLOv5 JPEG/PNG 单图推理，包含：
@@ -20,7 +20,7 @@ server/src/            gRPC 适配、会话和 RKNN 实现
 client/                Python SDK 与 Tk GUI
 cmake/                 RV1106 uClibc toolchain
 scripts/               构建、测试、部署和代码生成
-deploy/                板端进程管理脚本
+deploy/                板端进程管理与系统服务脚本
 docs/                  API 与部署文档
 tests/                 无硬件主机测试
 ```
@@ -45,12 +45,43 @@ bash scripts/build_server.sh
 
 产物位于 `dist/luckfox_rknn_grpc/`。
 
-### 3. 部署到开发板
+### 3. 打包与部署到开发板
+
+构建完成后可打包成单个 tar（未压缩 POSIX，BusyBox `tar -xf` 必可解，板端无需 zip/gzip）：
+
+```bash
+bash scripts/package_tar.sh
+# 产物: dist/luckfox_rknn_grpc-<版本>_<时间戳>.tar
+```
+
+一键部署（scp + 解包 + 安装系统服务，需先构建）：
 
 ```bash
 bash scripts/deploy.sh root@192.168.0.108
-ssh root@192.168.0.108 '/root/luckfox_rknn_grpc/start_server.sh status'
-ssh root@192.168.0.108 '/root/luckfox_rknn_grpc/start_server.sh logs'
+```
+
+或在板端手动操作：
+
+```bash
+# 主机: scp dist/luckfox_rknn_grpc-*.tar root@192.168.0.108:/tmp/
+# 板端:
+cd / && tar -xf /tmp/luckfox_rknn_grpc-*.tar            # 解出 /root/luckfox_rknn_grpc/
+sh /root/luckfox_rknn_grpc/deploy/install_service.sh    # 一次性安装为系统服务
+/etc/init.d/luckfox-rknn-grpc status                    # 检查运行状态
+```
+
+系统服务基于 SysVinit（BuildRoot + BusyBox init），开机自启，支持：
+
+```bash
+/etc/init.d/luckfox-rknn-grpc {start|stop|restart|reload|status}
+tail -f /root/luckfox_rknn_grpc/server.log              # 查看日志
+```
+
+后续升级（保留 `password` 与 `server.log`，旧包备份为 `.old`）：
+
+```bash
+sh deploy/update_server.sh ssh root@192.168.0.108       # 主机侧
+sh /root/luckfox_rknn_grpc/deploy/update_server.sh local /path/to/new_pkg   # 板端本地
 ```
 
 服务默认密码为 `19940724`。如需修改，在开发板创建 `/root/luckfox_rknn_grpc/password` 后重启服务；客户端填写相同密码。放行 UDP `50052` 用于扫描发现，TCP `50051` 用于 gRPC 推理。

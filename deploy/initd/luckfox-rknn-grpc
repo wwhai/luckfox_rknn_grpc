@@ -1,0 +1,154 @@
+#!/bin/sh
+#
+# /etc/init.d/luckfox-rknn-grpc
+#
+# SysVinit style init script for the Luckfox RKNN gRPC accelerator.
+# Compatible with BuildRoot + BusyBox init on Luckfox EV1106 boards.
+#
+# Usage:
+#   /etc/init.d/luckfox-rknn-grpc {start|stop|restart|reload|status}
+#
+# Environment overrides:
+#   APP_DIR         install directory (default /root/luckfox_rknn_grpc)
+#   LISTEN_ADDR     gRPC listen address (default 0.0.0.0:50051)
+#   MODEL_PATH      RKNN model path (default $APP_DIR/model/yolov5.rknn)
+#   MAX_IMAGE_BYTES max encoded image bytes (default 8388608)
+#   SESSION_TIMEOUT idle timeout seconds (default 300)
+#   PASSWORD_FILE   file overriding default password (default $APP_DIR/password)
+#   EXTRA_ARGS      appended verbatim to the server command line
+#   LOG_FILE        log file (default $APP_DIR/server.log)
+#   PID_FILE        pid file (default $APP_DIR/server.pid)
+#
+
+APP_DIR="${APP_DIR:-/root/luckfox_rknn_grpc}"
+BIN_PATH="$APP_DIR/rknn_grpc_server"
+LIB_DIR="$APP_DIR/lib"
+LOG_FILE="${LOG_FILE:-$APP_DIR/server.log}"
+PID_FILE="${PID_FILE:-$APP_DIR/server.pid}"
+PASSWORD_FILE="${PASSWORD_FILE:-$APP_DIR/password}"
+LISTEN_ADDR="${LISTEN_ADDR:-0.0.0.0:50051}"
+MODEL_PATH="${MODEL_PATH:-$APP_DIR/model/yolov5.rknn}"
+MAX_IMAGE_BYTES="${MAX_IMAGE_BYTES:-8388608}"
+SESSION_TIMEOUT="${SESSION_TIMEOUT:-300}"
+EXTRA_ARGS="${EXTRA_ARGS:-}"
+
+DEFAULT_PASSWORD="19940724"
+DAEMON_NAME="luckfox-rknn-grpc"
+
+mkdir -p "$APP_DIR"
+
+is_running() {
+    [ -f "$PID_FILE" ] || return 1
+    local pid
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null
+}
+
+read_password() {
+    if [ -f "$PASSWORD_FILE" ]; then
+        cat "$PASSWORD_FILE"
+    else
+        printf '%s' "$DEFAULT_PASSWORD"
+    fi
+}
+
+start() {
+    if is_running; then
+        echo "$DAEMON_NAME: already running (PID $(cat "$PID_FILE"))"
+        return 0
+    fi
+    if [ ! -x "$BIN_PATH" ]; then
+        echo "$DAEMON_NAME: binary not found at $BIN_PATH" >&2
+        return 1
+    fi
+    if [ ! -f "$MODEL_PATH" ]; then
+        echo "$DAEMON_NAME: model not found at $MODEL_PATH" >&2
+        return 1
+    fi
+
+    cd "$APP_DIR" || return 1
+
+    local password
+    password="$(read_password)"
+
+    # Inject the packaged shared libraries (librknnmrt.so etc.).
+    export LD_LIBRARY_PATH="$LIB_DIR:${LD_LIBRARY_PATH:-}"
+
+    # shellcheck disable=SC2086
+    nohup "$BIN_PATH" \
+        --listen "$LISTEN_ADDR" \
+        --model "$MODEL_PATH" \
+        --password "$password" \
+        --max-image-bytes "$MAX_IMAGE_BYTES" \
+        --session-timeout "$SESSION_TIMEOUT" \
+        $EXTRA_ARGS \
+        >>"$LOG_FILE" 2>&1 &
+
+    local pid=$!
+    echo "$pid" >"$PID_FILE"
+
+    sleep 1
+    if is_running; then
+        echo "$DAEMON_NAME: started (PID $pid, listen=$LISTEN_ADDR)"
+        return 0
+    fi
+
+    echo "$DAEMON_NAME: failed to start; see $LOG_FILE" >&2
+    rm -f "$PID_FILE"
+    return 1
+}
+
+stop() {
+    if ! is_running; then
+        echo "$DAEMON_NAME: not running"
+        rm -f "$PID_FILE"
+        return 0
+    fi
+
+    local pid
+    pid="$(cat "$PID_FILE")"
+    echo "$DAEMON_NAME: stopping (PID $pid)"
+    kill "$pid" 2>/dev/null || true
+
+    local waited=0
+    while is_running && [ "$waited" -lt 30 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    if is_running; then
+        echo "$DAEMON_NAME: graceful stop timed out, sending SIGKILL" >&2
+        kill -9 "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+
+    rm -f "$PID_FILE"
+    echo "$DAEMON_NAME: stopped"
+    return 0
+}
+
+status() {
+    if is_running; then
+        echo "$DAEMON_NAME: running (PID $(cat "$PID_FILE"))"
+        return 0
+    fi
+    echo "$DAEMON_NAME: stopped"
+    return 3
+}
+
+restart() {
+    stop
+    start
+}
+
+case "${1:-start}" in
+    start)   start ;;
+    stop)    stop ;;
+    reload)  restart ;;
+    restart) restart ;;
+    status)  status ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|reload|status}" >&2
+        exit 1 ;;
+esac

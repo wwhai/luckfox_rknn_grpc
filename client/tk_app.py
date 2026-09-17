@@ -113,8 +113,8 @@ class AcceleratorApp:
         self.video_playback_fps = 0.0
         self.video_inference_fps = 0.0
 
-        self.endpoint = tk.StringVar(value="192.168.0.108:50051")
-        self.password = tk.StringVar(value="19940724")
+        self.endpoint = tk.StringVar()
+        self.password = tk.StringVar()
         self.model = tk.StringVar(value="yolov5")
         self.score = tk.DoubleVar(value=0.25)
         self.nms = tk.DoubleVar(value=0.45)
@@ -299,6 +299,8 @@ class AcceleratorApp:
 
     def _scan(self) -> None:
         self._open_scan_dialog()
+        self._write_scan_log("Sending UDP broadcast to port 50052...")
+        self._write_scan_log("Waiting up to 1.5 seconds for responses...")
         self._set_busy(True, "Scanning")
         self._write_log("Discover -> UDP broadcast :50052")
         self._run_async("scan", self.client.discover)
@@ -308,7 +310,14 @@ class AcceleratorApp:
             self.scan_dialog.destroy()
         dialog = tk.Toplevel(self.root)
         dialog.title("Select RKNN Accelerator")
-        dialog.geometry("760x360")
+        dialog_width = 760
+        dialog_height = 500
+        self.root.update_idletasks()
+        dialog_x = self.root.winfo_rootx() + (self.root.winfo_width() - dialog_width) // 2
+        dialog_y = self.root.winfo_rooty() + (self.root.winfo_height() - dialog_height) // 2
+        dialog_x = max(0, min(dialog_x, dialog.winfo_screenwidth() - dialog_width))
+        dialog_y = max(0, min(dialog_y, dialog.winfo_screenheight() - dialog_height))
+        dialog.geometry(f"{dialog_width}x{dialog_height}+{dialog_x}+{dialog_y}")
         dialog.minsize(640, 300)
         dialog.transient(self.root)
         dialog.protocol("WM_DELETE_WINDOW", self._close_scan_dialog)
@@ -332,6 +341,11 @@ class AcceleratorApp:
         self.scan_tree.bind("<<TreeviewSelect>>", self._update_scan_selection)
         self.scan_tree.bind("<Double-1>", self._connect_selected_accelerator)
 
+        log_frame = ttk.LabelFrame(content, text="Scan Log", padding=6)
+        log_frame.pack(fill=tk.X, pady=(10, 0))
+        self.scan_log = tk.Text(log_frame, height=5, state=tk.DISABLED, wrap=tk.WORD)
+        self.scan_log.pack(fill=tk.X)
+
         actions = ttk.Frame(content, padding=(0, 10, 0, 0))
         actions.pack(fill=tk.X)
         ttk.Button(actions, text="Cancel", command=self._close_scan_dialog).pack(side=tk.RIGHT)
@@ -347,6 +361,14 @@ class AcceleratorApp:
         if self.scan_dialog is not None:
             self.scan_dialog.destroy()
             self.scan_dialog = None
+
+    def _write_scan_log(self, message: str) -> None:
+        if self.scan_dialog is None or not self.scan_dialog.winfo_exists():
+            return
+        self.scan_log.configure(state=tk.NORMAL)
+        self.scan_log.insert(tk.END, message + "\n")
+        self.scan_log.see(tk.END)
+        self.scan_log.configure(state=tk.DISABLED)
 
     def _update_scan_selection(self, _event=None) -> None:
         state = tk.NORMAL if self.scan_tree.selection() else tk.DISABLED
@@ -434,7 +456,7 @@ class AcceleratorApp:
         content = ttk.Frame(dialog, padding=14)
         content.pack(fill=tk.BOTH, expand=True)
         ttk.Label(content, text="RTSP / HTTP URL").pack(anchor=tk.W)
-        stream_url = tk.StringVar(value="rtsp://")
+        stream_url = tk.StringVar()
         entry = ttk.Entry(content, textvariable=stream_url)
         entry.pack(fill=tk.X, pady=(5, 12))
         entry.focus_set()
@@ -713,6 +735,7 @@ class AcceleratorApp:
             self._write_log(f"{operation} <- {code}: {value}")
             if operation == "scan" and self.scan_dialog is not None:
                 self.scan_status.configure(text=f"Scan failed: {value}")
+                self._write_scan_log(f"Scan failed: {value}")
             self._set_busy(False)
             self._update_controls()
             return
@@ -726,6 +749,7 @@ class AcceleratorApp:
                 self._write_log("Discover <- no accelerators")
                 if self.scan_dialog is not None:
                     self.scan_status.configure(text="No accelerator found. Check UDP 50052 and Windows firewall.")
+                    self._write_scan_log("Scan complete: no accelerators found.")
             else:
                 self.status.set("Discovered")
                 self.detail.set(f"Found {len(value)} accelerator(s)")
@@ -733,6 +757,10 @@ class AcceleratorApp:
                 if self.scan_dialog is not None:
                     self.scan_status.configure(text=f"Found {len(value)} accelerator(s). Select one to connect.")
                     for index, accelerator in enumerate(value):
+                        self._write_scan_log(
+                            f"Found {accelerator.endpoint} | {accelerator.hostname} | "
+                            f"{'busy' if accelerator.busy else 'available'}"
+                        )
                         self.scan_tree.insert(
                             "",
                             tk.END,
@@ -746,6 +774,7 @@ class AcceleratorApp:
                         )
                     self.scan_tree.selection_set("0")
                     self.scan_tree.focus("0")
+                    self._write_scan_log(f"Scan complete: {len(value)} accelerator(s) found.")
         elif operation == "connect":
             self.status.set("Connected")
             model = value.models[0] if value.models else None
